@@ -21,25 +21,32 @@ app.use(express.json());
 
 
 //Falta usar o joi
-app.post("/participants", (req,res)=>{
+app.post("/participants", async (req,res)=>{
     
     const { name } = req.body;
-   
-    db.collection("users").insertOne({
-		name:name,
-        lastStatus: Date.now()
-	}).then(()=>{
+
+    const alreadyExist = await db.collection("users").findOne({name:name})
+        
+    if(alreadyExist){
+        console.log("já tem")
+        res.sendStatus(409)
+    }
+    else{
+        await db.collection("users").insertOne({
+            name:name,
+            lastStatus: Date.now()
+        })
         db.collection("messages").insertOne({
             from:name,
             to: "Todos",
             text: "entra na sala...",
             type:"status",
-            time: dayjs().format('HH:mm:ss')
-        }),res.sendStatus(201)
-    });
-
-    
+                time: dayjs().format('HH:mm:ss')
+        })
+        res.sendStatus(201);
+        }  
 })
+//Pronto
 app.get("/participants", (req,res)=>{
     db.collection("users").find().toArray().then(users => res.status(200).send(users) )
 })
@@ -57,46 +64,40 @@ app.post("/messages", (req,res)=>{
         time: dayjs().format('HH:mm:ss')
 	}).then(res.sendStatus(201));
 })
-app.get("/messages", (req,res)=>{
+//Pronto
+app.get("/messages", async (req,res)=>{
     const { user } = req.headers;
     const limit = parseInt(req.query.limit);
-    db.collection("messages").find().toArray().then((messages) => filterMessages(messages));
+    const messages = await db.collection("messages").find().toArray();
 
-    function filterMessages(messages){
-        let sendableMessages=[];
-        for(let i=0;i<messages.length;i++){
-            if(messages[i].type === "message" || messages[i].type === "status"){
-                sendableMessages.push(messages[i]);
-            }else if(messages[i].from === user || messages[i].to === user || messages[i].to === "Todos"){
-                sendableMessages.push(messages[i]);
-            }
+    let sendableMessages=[];
+    for(let i=0;i<messages.length;i++){
+        if(messages[i].type === "message" || messages[i].type === "status"){
+            sendableMessages.push(messages[i]);
+        }else if(messages[i].from === user || messages[i].to === user || messages[i].to === "Todos"){
+            sendableMessages.push(messages[i]);
         }
-        if(Number.isInteger(limit)){
-            if(sendableMessages.length < limit){
-                res.status(200).send(sendableMessages);
-            }else{
-                const sendableMessagesWLimit = sendableMessages.slice(sendableMessages.length-limit);
-                res.status(200).send(sendableMessagesWLimit);
-            }
+    }
+    if(Number.isInteger(limit)){
+        if(sendableMessages.length < limit){
+            res.status(200).send(sendableMessages);
+        }else{
+            const sendableMessagesWLimit = sendableMessages.slice(sendableMessages.length-limit);
+            res.status(200).send(sendableMessagesWLimit);
         }
     }
 })
 
-app.post("/status", (req,res)=>{
+//Pronto
+app.post("/status", async (req,res)=>{
     const { user } = req.headers;
-
-    db.collection("users").findOne({name: user}, (err,user)).then((u)=> changeStatus(u));
-
-    function changeStatus(activeUser){
-        if(activeUser){
-            console.log(activeUser.lastStatus,activeUser.name)
-            activeUser.lastStatus = Date.now();
-            activeUser.save(()=>console.log("salvou"))
-            console.log(activeUser.lastStatus,activeUser.name)
-            res.sendStatus(200);
-        }else{
-            res.sendStatus(404);
-        }
+    try{
+        await db.collection("users").findOne({name: user});
+        await db.collection("users").updateOne({name: user},{$set:{lastStatus:Date.now()}});
+        res.sendStatus(200);
+    }
+    catch{
+        res.sendStatus(404);
     }
 })
 

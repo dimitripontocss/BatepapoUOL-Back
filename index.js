@@ -1,11 +1,13 @@
 import express from "express";
 import cors from "cors";
 import dotenv from 'dotenv';
-import { MongoClient } from "mongodb";
+import { MongoClient,ObjectId } from "mongodb";
 import Joi from "joi"
 import dayjs from "dayjs";
 
 dotenv.config();
+
+const TIMER = 15000;
 
 const mongoClient = new MongoClient(process.env.MONGO_URI);
 let db;
@@ -19,50 +21,66 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const userSchema = Joi.object({
+    name: Joi.string().required()
+});
 
-//Falta usar o joi
+const messageSchema = Joi.object({
+    to: Joi.string().required(),
+    text: Joi.string().required(),
+    
+})
+
+//Pronto
 app.post("/participants", async (req,res)=>{
     
     const { name } = req.body;
-
-    const alreadyExist = await db.collection("users").findOne({name:name})
-        
-    if(alreadyExist){
-        console.log("já tem")
-        res.sendStatus(409)
+    const validation = userSchema.validate(req.body)
+    if(validation.error){
+        res.sendStatus(422);
+        return;
+    }else{
+        const alreadyExist = await db.collection("users").findOne({name:name})
+            
+        if(alreadyExist){
+            res.sendStatus(409)
+        }
+        else{
+            await db.collection("users").insertOne({
+                name:name,
+                lastStatus: Date.now()
+            })
+            db.collection("messages").insertOne({
+                from:name,
+                to: "Todos",
+                text: "entra na sala...",
+                type:"status",
+                    time: dayjs().format('HH:mm:ss')
+            })
+            res.sendStatus(201);
+            }
     }
-    else{
-        await db.collection("users").insertOne({
-            name:name,
-            lastStatus: Date.now()
-        })
-        db.collection("messages").insertOne({
-            from:name,
-            to: "Todos",
-            text: "entra na sala...",
-            type:"status",
-                time: dayjs().format('HH:mm:ss')
-        })
-        res.sendStatus(201);
-        }  
+      
 })
 //Pronto
-app.get("/participants", (req,res)=>{
-    db.collection("users").find().toArray().then(users => res.status(200).send(users) )
+app.get("/participants", async (req,res)=>{
+    const users = await db.collection("users").find().toArray();
+    res.status(200).send(users);
 })
 
 //Falta usar o joi
-app.post("/messages", (req,res)=>{
+app.post("/messages", async (req,res)=>{
     const { to, text, type} = req.body;
     const { user } = req.headers;
 
-    db.collection("messages").insertOne({
-		from:user,
-        to: to,
-        text: text,
-        type: type,
-        time: dayjs().format('HH:mm:ss')
-	}).then(res.sendStatus(201));
+    await db.collection("messages").insertOne({
+            from:user,
+            to: to,
+            text: text,
+            type: type,
+            time: dayjs().format('HH:mm:ss')
+        })
+    res.sendStatus(201);
 })
 //Pronto
 app.get("/messages", async (req,res)=>{
@@ -100,5 +118,81 @@ app.post("/status", async (req,res)=>{
         res.sendStatus(404);
     }
 })
+
+//Pronto
+app.delete("/messages/:ID_DA_MENSAGEM", async (req,res)=>{
+    const { ID_DA_MENSAGEM } = req.params;
+    const { user } = req.headers;
+    
+    const check = await db.collection("messages").findOne({_id: new ObjectId(ID_DA_MENSAGEM)})
+    if(check.error){
+        res.sendStatus(404);
+        return;
+    }else{
+        if(check.from === user){
+            try{
+                await db.collection("messages").deleteOne({_id: new ObjectId(ID_DA_MENSAGEM)});
+            }catch (error) {
+                console.error(error);
+                res.sendStatus(500);
+              }
+        }else{
+            res.sendStatus(401);
+        }
+        
+    }
+})
+
+
+//Falta usar o joi
+app.put("/messages/:ID_DA_MENSAGEM", async (req,res)=>{
+    console.log("entrou")
+    const { ID_DA_MENSAGEM } = req.params;
+    const { user } = req.headers;
+    const { to, text, type} = req.body;
+    
+    const check = await db.collection("messages").findOne({_id: new ObjectId(ID_DA_MENSAGEM)})
+    if(check.error){
+        res.sendStatus(404);
+        return;
+    }else{
+        console.log(check,user)
+        if(check.from === user){
+            try{
+                await db.collection("messages").updateOne({_id: new ObjectId(ID_DA_MENSAGEM)},{$set:{
+                    from:user,
+                    to: to,
+                    text: text,
+                    type: type,
+                    time: dayjs().format('HH:mm:ss')
+                }});
+                res.sendStatus(200);
+            }catch (error) {
+                res.sendStatus(500);
+              }
+        }else{
+            res.sendStatus(401);
+        }
+        
+    }
+})
+
+
+//Pronto
+setInterval(async ()=>{
+    const users = await db.collection("users").find().toArray();
+    for(let i=0;i<users.length;i++){
+        if(Date.now() - users[i].lastStatus >= 10000){
+            await db.collection("users").deleteOne({ name: users[i].name});
+            await db.collection("messages").insertOne({
+                from:users[i].name,
+                to: "Todos",
+                text: "sai da sala...",
+                type: "status",
+                time: dayjs().format('HH:mm:ss')
+            })
+        }
+    }
+}, TIMER);
 
 app.listen(5001);

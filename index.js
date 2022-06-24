@@ -25,13 +25,26 @@ const userSchema = Joi.object({
     name: Joi.string().required()
 });
 
-const messageSchema = Joi.object({
+const messageSchemaBody = Joi.object({
     to: Joi.string().required(),
     text: Joi.string().required(),
+    type: Joi.string().required().valid("message", "private_message")
     
 })
 
-//Pronto
+async function verificaUser(name){
+    const users = await db.collection("users").find().toArray();
+    for(let i=0;i<users.length;i++){
+        if(name === users[i].user){
+            return true
+        }
+    }
+    return false
+}
+
+const messageSchemaHeaders = Joi.boolean()
+
+
 app.post("/participants", async (req,res)=>{
     
     const { name } = req.body;
@@ -62,16 +75,23 @@ app.post("/participants", async (req,res)=>{
     }
       
 })
-//Pronto
 app.get("/participants", async (req,res)=>{
     const users = await db.collection("users").find().toArray();
     res.status(200).send(users);
 })
 
-//Falta usar o joi
+
 app.post("/messages", async (req,res)=>{
     const { to, text, type} = req.body;
     const { user } = req.headers;
+    const checkUser = await verificaUser(user)
+
+    const validateUser = messageSchemaHeaders.validateAsync(checkUser)
+    const validation = messageSchemaBody.validate(req.body);
+    if(validation.error || validateUser.error ){
+        res.sendStatus(422);
+        return;
+    }
 
     await db.collection("messages").insertOne({
             from:user,
@@ -82,7 +102,6 @@ app.post("/messages", async (req,res)=>{
         })
     res.sendStatus(201);
 })
-//Pronto
 app.get("/messages", async (req,res)=>{
     const { user } = req.headers;
     const limit = parseInt(req.query.limit);
@@ -106,7 +125,7 @@ app.get("/messages", async (req,res)=>{
     }
 })
 
-//Pronto
+
 app.post("/status", async (req,res)=>{
     const { user } = req.headers;
     try{
@@ -119,7 +138,7 @@ app.post("/status", async (req,res)=>{
     }
 })
 
-//Pronto
+
 app.delete("/messages/:ID_DA_MENSAGEM", async (req,res)=>{
     const { ID_DA_MENSAGEM } = req.params;
     const { user } = req.headers;
@@ -133,7 +152,6 @@ app.delete("/messages/:ID_DA_MENSAGEM", async (req,res)=>{
             try{
                 await db.collection("messages").deleteOne({_id: new ObjectId(ID_DA_MENSAGEM)});
             }catch (error) {
-                console.error(error);
                 res.sendStatus(500);
               }
         }else{
@@ -144,19 +162,23 @@ app.delete("/messages/:ID_DA_MENSAGEM", async (req,res)=>{
 })
 
 
-//Falta usar o joi
 app.put("/messages/:ID_DA_MENSAGEM", async (req,res)=>{
-    console.log("entrou")
     const { ID_DA_MENSAGEM } = req.params;
     const { user } = req.headers;
     const { to, text, type} = req.body;
-    
+    const checkUser = await verificaUser(user)
+
+    const validateUser = messageSchemaHeaders.validateAsync(checkUser)
+    const validation = messageSchemaBody.validate(req.body);
+    if(validation.error || validateUser.error){
+        res.sendStatus(422);
+        return;
+    }
     const check = await db.collection("messages").findOne({_id: new ObjectId(ID_DA_MENSAGEM)})
     if(check.error){
         res.sendStatus(404);
         return;
     }else{
-        console.log(check,user)
         if(check.from === user){
             try{
                 await db.collection("messages").updateOne({_id: new ObjectId(ID_DA_MENSAGEM)},{$set:{
@@ -178,7 +200,6 @@ app.put("/messages/:ID_DA_MENSAGEM", async (req,res)=>{
 })
 
 
-//Pronto
 setInterval(async ()=>{
     const users = await db.collection("users").find().toArray();
     for(let i=0;i<users.length;i++){
